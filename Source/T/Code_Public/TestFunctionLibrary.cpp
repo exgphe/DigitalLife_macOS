@@ -112,7 +112,7 @@ void UTestFunctionLibrary::SetWindowsSize(FVector2D Size, bool Adsorption) {
 }
 
 FVector2D UTestFunctionLibrary::GetUserWindowsSize() {
-#if !PLATFORM_ANDROID
+#if PLATFORM_WINDOWS
 	RECT rt;
 	SystemParametersInfo(SPI_GETWORKAREA, 0, &rt, 0);
 	return FVector2D(rt.right, rt.bottom);
@@ -121,7 +121,7 @@ FVector2D UTestFunctionLibrary::GetUserWindowsSize() {
 }
 
 void UTestFunctionLibrary::MinimizeWindow() {
-#if !PLATFORM_ANDROID
+#if PLATFORM_DESKTOP
 	UGameEngine* GameEngine = Cast<UGameEngine>(GEngine);
 	if (!GameEngine->IsValidLowLevel()) {
 		return;
