@@ -15,7 +15,7 @@ public class libProtobuf : ModuleRules {
 		if (Target.Platform == UnrealTargetPlatform.Win64) {
 			PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "lib", "Windows", "libprotobuf.lib"));
 		} else if (Target.Platform == UnrealTargetPlatform.IOS) {
-			PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "lib", "IOS", "libprotobuf.a"));
+			// PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "lib", "IOS", "libprotobuf.a"));
 		} else if (Target.Platform == UnrealTargetPlatform.Android) {
 			PublicDefinitions.Add("HAVE_PTHREAD");
 			
