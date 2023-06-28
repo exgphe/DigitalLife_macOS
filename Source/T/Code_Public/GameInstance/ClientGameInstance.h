@@ -72,8 +72,18 @@ public:
 			FScopeLock ScopeLock(&Lock_TestValue);
 			ClientBuffData.Empty();
 			BuffDataSize = 0;
-		}	
+		}
 	};
+
+	void ReduceBuff(int32 NowSize, uint64 BuffSize)
+	{
+		{
+			FScopeLock ScopeLock(&Lock_TestValue);
+			ClientBuffData.RemoveAt(0, NowSize);
+			BuffDataSize -= NowSize;
+		};
+	}
+
 
 	UFUNCTION(BlueprintCallable)
 		void NextWav();
