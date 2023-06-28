@@ -227,12 +227,15 @@ void UFlibPakHelper::ReloadShaderbytecode()
 }
 
 
-bool UFlibPakHelper::LoadShaderbytecode(const FString& LibraryName, const FString& LibraryDir)
+bool UFlibPakHelper::LoadShaderbytecode(const FString& LibraryName, const FString& LibraryDir,bool bNative)
 {
 	bool result = true;
 	FString FinalLibraryDir = LibraryDir;
 #if PLATFORM_IOS
-	FinalLibraryDir = IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*LibraryDir);;
+	if(bNative)
+	{
+		FinalLibraryDir = IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*LibraryDir);
+	}
 #endif
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION >= 23
 	result = FShaderCodeLibrary::OpenLibrary(LibraryName, LibraryDir);
@@ -316,10 +319,14 @@ bool UFlibPakHelper::LoadAssetRegistry(const FString& LibraryName, const FString
 }
 
 
-
+#include "Misc/EngineVersionComparison.h"
 bool UFlibPakHelper::OpenPSO(const FString& Name)
 {
+#if UE_VERSION_OLDER_THAN(5,1,0)
 	return FShaderPipelineCache::OpenPipelineFileCache(Name,GMaxRHIShaderPlatform);
+#else
+	return FShaderPipelineCache::OpenPipelineFileCache(GMaxRHIShaderPlatform);
+#endif
 }
 
 FAES::FAESKey CachedAESKey;

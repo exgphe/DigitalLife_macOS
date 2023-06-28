@@ -161,7 +161,8 @@ public:
 	static FString ReleaseSummary(const FHotPatcherVersion& NewVersion);
 	static FString PatchSummary(const FPatchVersionDiff& DiffInfo);
 
-	static FString MakePakShortName(const FHotPatcherVersion& InCurrentVersion, const FChunkInfo& InChunkInfo, const FString& InPlatform,const FString& InRegular);
+	
+	static FString ReplacePakRegular(const FReplacePakRegular& RegularConf, const FString& InRegular);
 	static bool CheckSelectedAssetsCookStatus(const FString& OverrideCookedDir,const TArray<FString>& PlatformNames, const FAssetDependenciesInfo& SelectedAssets, FString& OutMsg);
 	static bool CheckPatchRequire(const FString& OverrideCookedDir,const FPatchVersionDiff& InDiff,const TArray<FString>& PlatformNames,FString& OutMsg);
 
@@ -230,7 +231,7 @@ public:
 	static FProjectPackageAssetCollection ImportProjectSettingsPackages();
 
 	static void WaitForAsyncFileWrites();
-
+	static void WaitDDCComplete();
 	static bool IsCanCookPackage(const FString& LongPackageName);
 	
 	static void ImportProjectSettingsToScannerConfig(FAssetScanConfig& AssetScanConfig);
@@ -277,14 +278,17 @@ public:
 	static void AdaptorOldVersionConfig(FAssetScanConfig& ScanConfig,const FString& JsonContent);
 	
 	static bool GetIniPlatformName(const FString& PlatformName,FString& OutIniPlatformName);
-
-	
 	
 	// need add UNREALED_API to FAssetRegistryGenerator
 	// all chunksinfo.csv / pakchunklist.txt / assetregistry.bin
 	static bool SerializeChunksManifests(ITargetPlatform* TargetPlatform, const TSet<FName>&, const TSet<FName>&, bool bGenerateStreamingInstallManifest = true);
 	static TArray<UClass*> GetClassesByNames(const TArray<FName>& ClassesNames);
 	static TArray<UClass*> GetAllMaterialClasses();
+	static bool IsMaterialClasses(UClass* Class);
+	static bool IsMaterialClassName(FName ClassName);
+	static bool AssetDetailsHasClasses(const TArray<FAssetDetail>& AssetDetails,TSet<FName> ClasssName);
 	static TSet<FName> GetAllMaterialClassesNames();
-
+	static TArray<UClass*> GetPreCacheClasses();
+	static void DumpActiveTargetPlatforms();
+	static FString GetPlatformsStr(TArray<ETargetPlatform> Platforms);
 };

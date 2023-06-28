@@ -7,9 +7,20 @@
 #endif
 #include "Engine/EngineBaseTypes.h"
 #include "Sound/SoundGroups.h"
-#include "Launch/Resources/Version.h"
+#include "Misc/EngineVersionComparison.h"
+
+#if UE_VERSION_OLDER_THAN(4, 26, 0)
+#include "DSP/BufferVectorOperations.h"
+#endif
 
 #include "RuntimeAudioImporterTypes.generated.h"
+
+#if UE_VERSION_OLDER_THAN(4, 26, 0)
+namespace Audio
+{
+	using FAlignedFloatBuffer = Audio::AlignedFloatBuffer;
+}
+#endif
 
 /** Possible audio importing results */
 UENUM(BlueprintType, Category = "Runtime Audio Importer")
@@ -51,10 +62,13 @@ enum class ERuntimeAudioFormat : uint8
 UENUM(BlueprintType, Category = "Runtime Audio Importer")
 enum class ERuntimeRAWAudioFormat : uint8
 {
-	Int16 UMETA(DisplayName = "Signed 16-bit PCM"),
-	Int32 UMETA(DisplayName = "Signed 32-bit PCM"),
-	UInt8 UMETA(DisplayName = "Unsigned 8-bit PCM"),
-	Float32 UMETA(DisplayName = "32-bit float")
+	Int8 UMETA(DisplayName = "Signed 8-bit integer"),
+	UInt8 UMETA(DisplayName = "Unsigned 8-bit integer"),
+	Int16 UMETA(DisplayName = "Signed 16-bit integer"),
+	UInt16 UMETA(DisplayName = "Unsigned 16-bit integer"),
+	Int32 UMETA(DisplayName = "Signed 32-bit integer"),
+	UInt32 UMETA(DisplayName = "Unsigned 32-bit integer"),
+	Float32 UMETA(DisplayName = "Floating point 32-bit")
 };
 
 /**
@@ -64,7 +78,7 @@ template <typename DataType>
 class FRuntimeBulkDataBuffer
 {
 public:
-#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 26
+#if UE_VERSION_OLDER_THAN(4, 27, 0)
 	using ViewType = TArrayView<DataType>;
 #else
 	using ViewType = TArrayView64<DataType>;
@@ -86,7 +100,7 @@ public:
 	FRuntimeBulkDataBuffer(DataType* InBuffer, int64 InNumberOfElements)
 		: View(InBuffer, InNumberOfElements)
 	{
-#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 26
+#if UE_VERSION_OLDER_THAN(4, 27, 0)
 		check(InNumberOfElements <= TNumericLimits<int32>::Max())
 #endif
 	}
@@ -94,15 +108,15 @@ public:
 	template <typename Allocator>
 	explicit FRuntimeBulkDataBuffer(const TArray<DataType, Allocator>& Other)
 	{
-		const int64 BulkDataSize = Other.Num() * sizeof(DataType);
+		const int64 BulkDataSize = Other.Num();
 
-		DataType* BulkData = static_cast<DataType*>(FMemory::Malloc(BulkDataSize));
+		DataType* BulkData = static_cast<DataType*>(FMemory::Malloc(BulkDataSize * sizeof(DataType)));
 		if (!BulkData)
 		{
 			return;
 		}
 
-		FMemory::Memcpy(BulkData, Other.GetData(), BulkDataSize);
+		FMemory::Memcpy(BulkData, Other.GetData(), BulkDataSize * sizeof(DataType));
 		View = ViewType(BulkData, BulkDataSize);
 	}
 
@@ -119,8 +133,8 @@ public:
 		{
 			const int64 BufferSize = Other.View.Num();
 
-			DataType* BufferCopy = static_cast<DataType*>(FMemory::Malloc(BufferSize));
-			FMemory::Memcpy(BufferCopy, Other.View.GetData(), BufferSize);
+			DataType* BufferCopy = static_cast<DataType*>(FMemory::Malloc(BufferSize * sizeof(DataType)));
+			FMemory::Memcpy(BufferCopy, Other.View.GetData(), BufferSize * sizeof(DataType));
 
 			View = ViewType(BufferCopy, BufferSize);
 		}
@@ -144,7 +158,6 @@ public:
 	void Empty()
 	{
 		FreeBuffer();
-
 		View = ViewType();
 	}
 
@@ -152,7 +165,7 @@ public:
 	{
 		FreeBuffer();
 
-#if ENGINE_MAJOR_VERSION == 4 && ENGINE_MINOR_VERSION <= 26
+#if UE_VERSION_OLDER_THAN(4, 27, 0)
 		check(InNumberOfElements <= TNumericLimits<int32>::Max())
 #endif
 
@@ -285,9 +298,15 @@ struct FEncodedAudioStruct
 	{
 	}
 
-	/** Custom constructor */
-	FEncodedAudioStruct(uint8* AudioData, int64 AudioDataSize, ERuntimeAudioFormat AudioFormat)
-		: AudioData(AudioData, AudioDataSize)
+	template <typename Allocator>
+	FEncodedAudioStruct(const TArray<uint8, Allocator>& AudioDataArray, ERuntimeAudioFormat AudioFormat)
+		: AudioData(AudioDataArray)
+	  , AudioFormat(AudioFormat)
+	{
+	}
+	
+	FEncodedAudioStruct(FRuntimeBulkDataBuffer<uint8> AudioDataBulk, ERuntimeAudioFormat AudioFormat)
+		: AudioData(MoveTemp(AudioDataBulk))
 	  , AudioFormat(AudioFormat)
 	{
 	}
@@ -380,7 +399,7 @@ struct FRuntimeAudioInputDeviceInfo
 #if WITH_RUNTIMEAUDIOIMPORTER_CAPTURE_SUPPORT
 	FRuntimeAudioInputDeviceInfo(const Audio::FCaptureDeviceInfo& DeviceInfo)
 		: DeviceName(DeviceInfo.DeviceName)
-#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION > 24
+#if UE_VERSION_NEWER_THAN(4, 25, 0)
 	  , DeviceId(DeviceInfo.DeviceId)
 #endif
 	  , InputChannels(DeviceInfo.InputChannels)
@@ -449,11 +468,47 @@ struct FRuntimeAudioHeaderInfo
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Runtime Audio Importer")
 	int32 SampleRate;
 
-	/** PCM data size in floating-point format */
+	/** PCM data size in 32-bit float format */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, DisplayName = "PCM Data Size", Category = "Runtime Audio Importer")
 	int64 PCMDataSize;
 
 	/** Format of the source audio data (e.g. mp3, flac, etc) */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Runtime Audio Importer")
 	ERuntimeAudioFormat AudioFormat;
+};
+
+/** Audio export override options */
+USTRUCT(BlueprintType, Category = "Runtime Audio Importer")
+struct FRuntimeAudioExportOverrideOptions
+{
+	GENERATED_BODY()
+
+	FRuntimeAudioExportOverrideOptions()
+		: NumOfChannels(-1)
+	  , SampleRate(-1)
+	{
+	}
+
+	bool IsOverriden() const
+	{
+		return IsNumOfChannelsOverriden() || IsSampleRateOverriden();
+	}
+
+	bool IsSampleRateOverriden() const
+	{
+		return SampleRate != -1;
+	}
+
+	bool IsNumOfChannelsOverriden() const
+	{
+		return NumOfChannels != -1;
+	}
+
+	/** Number of channels. Set to -1 to retrieve from source. Mixing if count differs from source */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Audio Importer")
+	int32 NumOfChannels;
+    
+	/** Audio sampling rate (samples per second, sampling frequency). Set to -1 to retrieve from source. Resampling if count differs from source */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime Audio Importer")
+	int32 SampleRate;
 };

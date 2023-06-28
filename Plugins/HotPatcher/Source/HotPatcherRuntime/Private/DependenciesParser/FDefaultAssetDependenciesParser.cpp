@@ -65,7 +65,7 @@ void FAssetDependenciesParser::Parse(const FAssetDependencies& InParseConfig)
 				continue;
 			}
 			FAssetData AssetData;
-			if(UFlibAssetManageHelper::GetAssetsDataByPackageName(LongPackageName,AssetData))
+			if(!LongPackageName.IsEmpty() && UFlibAssetManageHelper::GetAssetsDataByPackageName(LongPackageName,AssetData))
 			{
 				if(IsIgnoreAsset(AssetData))
 				{
@@ -126,7 +126,7 @@ bool IsValidPackageName(const FString& LongPackageName)
 bool FAssetDependenciesParser::IsIgnoreAsset(const FAssetData& AssetData)
 {
 	FString LongPackageName = AssetData.PackageName.ToString();
-	bool bIsForceSkip = IsForceSkipAsset(LongPackageName,ParseConfig.IgnoreAseetTypes,ParseConfig.IgnoreFilters,ParseConfig.ForceSkipContents,ParseConfig.ForceSkipPackageNames);
+	bool bIsForceSkip = IsForceSkipAsset(LongPackageName,ParseConfig.IgnoreAseetTypes,ParseConfig.IgnoreFilters,ParseConfig.ForceSkipContents,ParseConfig.ForceSkipPackageNames,true);
 	auto HashPackageFlag = [](uint32 Flags,uint32 CheckFlag)->bool
 	{
 		return (Flags & CheckFlag) != 0;	
@@ -136,7 +136,8 @@ bool FAssetDependenciesParser::IsIgnoreAsset(const FAssetData& AssetData)
 	return bIsForceSkip || bIsEditorFlag;
 }
 
-bool FAssetDependenciesParser::IsForceSkipAsset(const FString& LongPackageName,const TSet<FName>& IgnoreTypes,const TArray<FString>& IgnoreFilters,TArray<FString> ForceSkipFilters,const TArray<FString>& ForceSkipPackageNames)
+bool FAssetDependenciesParser::IsForceSkipAsset(const FString& LongPackageName, const TSet<FName>& IgnoreTypes, const TArray<FString>& IgnoreFilters, TArray<FString> ForceSkipFilters, const TArray<FString>& ForceSkipPackageNames, bool
+                                                bDispalyLog)
 {
 	SCOPED_NAMED_EVENT_TEXT("IsForceSkipAsset",FColor::Red);
 	bool bIsIgnore = false;
@@ -161,7 +162,7 @@ bool FAssetDependenciesParser::IsForceSkipAsset(const FString& LongPackageName,c
 		bIsIgnore = true;
 	}
 
-	if(bIsIgnore)
+	if(bIsIgnore && bDispalyLog)
 	{
 #if ASSET_DEPENDENCIES_DEBUG_LOG
 		UE_LOG(LogHotPatcher,Log,TEXT("Force Skip %s (match ignore rule %s)"),*LongPackageName,*MatchIgnoreStr);
@@ -175,8 +176,8 @@ TArray<FName> ParserSkipAssetByDependencies(const FAssetData& CurrentAssetData,c
 	SCOPED_NAMED_EVENT_TEXT("ParserSkipAssetByDependencies",FColor::Red);
 	bool bHasAtlsGroup = false;
 	TArray<FName> TextureSrouceRefs;
-	if(CurrentAssetData.AssetClass.IsEqual(TEXT("PaperSprite")))
-	{	
+	if(UFlibAssetManageHelper::GetAssetDataClasses(CurrentAssetData).IsEqual(TEXT("PaperSprite")))
+	{
 		for(const auto& DependItemName:CurrentAssetDependencies)
 		{
 			FAssetDetail AssetDetail = UFlibAssetManageHelper::GetAssetDetailByPackageName(DependItemName.ToString());
@@ -206,6 +207,8 @@ TSet<FName> FAssetDependenciesParser::GatherAssetDependicesInfoRecursively(
     const TSet<FName>& IgnoreAssetTypes,
     FScanedCachesType& InScanedCaches)
 {
+	static bool bVerboseLog = FParse::Param(FCommandLine::Get(), TEXT("VerboseLog"));
+	
 	TSet<FName> AssetDependencies;
 	SCOPED_NAMED_EVENT_TEXT("GatherAssetDependicesInfoRecursively",FColor::Red);
 	TArray<FString> TempForceSkipPackageNames = ForceSkipPackageNames;
@@ -283,18 +286,28 @@ TSet<FName> FAssetDependenciesParser::GatherAssetDependicesInfoRecursively(
 			// check is ignore directories or ingore types
 			{
 				SCOPED_NAMED_EVENT_TEXT("check ignore directories",FColor::Red);
-				if(!IsForceSkipAsset(LongPackageNameStr,IgnoreAssetTypes,IgnoreDirectories,ForceSkipDirectories,TempForceSkipPackageNames))
+				if(!IsForceSkipAsset(LongPackageNameStr,IgnoreAssetTypes,IgnoreDirectories,ForceSkipDirectories,TempForceSkipPackageNames,true))
 				{
 					FScopeLock Lock(&SynchronizationObject);
 					AssetDependencies.Add(LongPackageName);
 				}
 			}
-		},GForceSingleThread);
+		},true);
 	}
 	
 	if(bRecursively)
 	{
 		TSet<FName> Dependencies;
+#if ASSET_DEPENDENCIES_DEBUG_LOG
+		if(bVerboseLog)
+		{
+			UE_LOG(LogHotPatcher,Display,TEXT("AssetParser %s Dependencies: (%d)"),*InLongPackageName.ToString(),AssetDependencies.Num());
+			for(const auto& AssetPackageName:AssetDependencies)
+			{
+				UE_LOG(LogHotPatcher,Display,TEXT("\t%s"),*AssetPackageName.ToString());
+			}
+		}
+#endif
 		for(const auto& AssetPackageName:AssetDependencies)
 		{
 			if(AssetPackageName.IsNone())

@@ -22,9 +22,11 @@ struct VRM4U_API FAnimNode_VrmConstraint : public FAnimNode_SkeletalControlBase
 	GENERATED_USTRUCT_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Skeleton, meta=(PinHiddenByDefault))
-	UVrmMetaObject *VrmMetaObject = nullptr;
+	const UVrmMetaObject *VrmMetaObject = nullptr;
 
+	bool bCallInitialized = false;
 
+	bool bCallByAnimInstance = false;
 
 	FAnimNode_VrmConstraint();
 

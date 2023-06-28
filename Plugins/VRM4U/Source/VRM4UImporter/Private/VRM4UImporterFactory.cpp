@@ -2,6 +2,9 @@
 
 #include "VRM4UImporterFactory.h"
 #include "VRM4UImporterLog.h"
+
+#include "Misc/EngineVersionComparison.h"
+
 #include "AssetToolsModule.h"
 #if	UE_VERSION_OLDER_THAN(4,26,0)
 #include "AssetRegistryModule.h"
@@ -11,6 +14,7 @@
 #include "PackageTools.h"
 #include "Misc/Paths.h"
 #include "Engine/SkeletalMesh.h"
+#include "EditorFramework/AssetImportData.h"
 //#include "Runtime/CoreUObject/Public/UObject/ConstructorHelpers.h"
 #include "UObject/ConstructorHelpers.h"
 #include "LoaderBPFunctionLibrary.h"
@@ -352,6 +356,7 @@ UObject* UVRM4UImporterFactory::FactoryCreateBinary(UClass* InClass, UObject* In
 		}
 
 		m = NewObject<UVrmAssetListObject>((UObject*)GetTransientPackage(), c.Get());
+
 	}
 
 	//UVrmAssetListObject *m = Cast<UVrmAssetListObject>(u);
@@ -427,46 +432,44 @@ UObject* UVRM4UImporterFactory::FactoryCreateText(UClass* InClass, UObject* InPa
 	return nullptr;
 }
 
-/*
-UObject* UVRMImporterFactory::CreateNewAsset(UClass* AssetClass, const FString& TargetPath, const FString& DesiredName, EObjectFlags Flags)
-{
-	FAssetToolsModule& AssetToolsModule = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools");
+bool UVRM4UImporterFactory::CanReimport(UObject* Obj, TArray<FString>& OutFilenames) {
 
-	// Create a unique package name and asset name for the frame
-	const FString TentativePackagePath = PackageTools::SanitizePackageName(TargetPath + TEXT("/") + DesiredName);
-	FString DefaultSuffix;
-	FString AssetName;
-	FString PackageName;
-	AssetToolsModule.Get().CreateUniqueAssetName(TentativePackagePath, DefaultSuffix,  PackageName,  AssetName);
+	UVrmAssetListObject* assetList= Cast<UVrmAssetListObject>(Obj);
+	TArray<FString> FactoryExtensions;
+	GetSupportedFileExtensions(FactoryExtensions);
 
-	// Create a package for the asset
-	UObject* OuterForAsset = CreatePackage(nullptr, *PackageName);
-
-	// Create a frame in the package
-	UObject* NewAsset = NewObject<UObject>(OuterForAsset, AssetClass, *AssetName, Flags);
-	FAssetRegistryModule::AssetCreated(NewAsset);
-
-	NewAsset->Modify();
-	return NewAsset;
+	if (assetList)
+	{
+		if (UAssetImportData* AssetImportData = assetList->GetAssetImportData())
+		{
+			AssetImportData->ExtractFilenames(OutFilenames);
+			return true;
+		}
+		else
+		{
+			OutFilenames.Add(TEXT(""));
+		}
+		return true;
+	}
+	return false;
 }
-*/
-
-/*
-UObject* USpriterImporterFactory::ImportAsset(const FString& SourceFilename, const FString& TargetSubPath)
-{
-	FAssetToolsModule& AssetToolsModule = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools");
-
-	TArray<FString> FileNames;
-	FileNames.Add(SourceFilename);
-
-	TArray<UObject*> ImportedAssets = AssetToolsModule.Get().ImportAssets(FileNames, TargetSubPath);
-	return (ImportedAssets.Num() > 0) ? ImportedAssets[0] : nullptr;
+void UVRM4UImporterFactory::SetReimportPaths(UObject* Obj, const TArray<FString>& NewReimportPaths) {
+	UVrmAssetListObject* assetList = Cast<UVrmAssetListObject>(Obj);
+	if (assetList && ensure(NewReimportPaths.Num() == 1))
+	{
+		assetList->AssetImportData->UpdateFilenameOnly(NewReimportPaths[0]);
+	}
 }
-*/
+EReimportResult::Type UVRM4UImporterFactory::Reimport(UObject* Obj) {
+	return EReimportResult::Failed;
+}
+int32 UVRM4UImporterFactory::GetPriority() const {
+	return ImportPriority;
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 
-//#undef SPRITER_IMPORT_ERROR
 
 
 

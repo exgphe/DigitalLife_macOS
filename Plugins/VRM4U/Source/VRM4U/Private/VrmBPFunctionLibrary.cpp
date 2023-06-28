@@ -889,8 +889,10 @@ void UVrmBPFunctionLibrary::VRMChangeMaterialStaticSwitch(UMaterialInstanceConst
 
 #if	UE_VERSION_OLDER_THAN(5,1,0)
 		auto &params = paramSet.StaticSwitchParameters;
-#else
+#elif	UE_VERSION_OLDER_THAN(5,2,0)
 		auto& params = paramSet.EditorOnly.StaticSwitchParameters;
+#else
+		auto& params = paramSet.StaticSwitchParameters;
 #endif
 		int i = 0;
 		for (i = 0; i < params.Num(); ++i) {

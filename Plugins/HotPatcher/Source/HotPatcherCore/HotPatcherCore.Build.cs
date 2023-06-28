@@ -61,8 +61,8 @@ public class HotPatcherCore : ModuleRules
 				"InputCore",
 				"CoreUObject",
 				"Engine",
-				"RenderCore",
-				"Sockets"
+				"Sockets",
+				"DerivedDataCache"
 				// ... add private dependencies that you statically link with here ...	
 			}
 		);
@@ -165,10 +165,10 @@ public class HotPatcherCore : ModuleRules
 			});
 		}
 		
-		bool bGenerateChunksManifest = true;
+		bool bGenerateChunksManifest = false;
+		AddPublicDefinitions("GENERATE_CHUNKS_MANIFEST", bGenerateChunksManifest);
 		if (bGenerateChunksManifest)
 		{
-			AddPublicDefinitions("GENERATE_CHUNKS_MANIFEST", true);
 			PublicIncludePaths.AddRange(new string[]
 			{
 				Path.Combine(EngineDirectory,"Source/Editor/UnrealEd/Public"),
@@ -183,14 +183,14 @@ public class HotPatcherCore : ModuleRules
 				// Path.Combine(EngineDirectory,"Source/Developer/IoStoreUtilities/Internal"),
 				// Path.Combine(EngineDirectory,"Source/Editor/UnrealEd/Private/Cooker"),
 				// Path.Combine(EngineDirectory,"Source/Editor/UnrealEd/Private"),
-				Path.Combine(EngineDirectory,"Source/Runtime/CoreUObject/Internal"),
+				Path.Combine(EngineDirectory,"Source/Runtime/CoreUObject/Internal/Serialization"),
 			});
 		}
 		
 		PublicDefinitions.AddRange(new string[]
 		{
 			"TOOL_NAME=\"HotPatcher\"",
-			"CURRENT_VERSION_ID=77",
+			"CURRENT_VERSION_ID=81",
 			"CURRENT_PATCH_ID=0",
 			"REMOTE_VERSION_FILE=\"https://imzlp.com/opensource/version.json\""
 		});

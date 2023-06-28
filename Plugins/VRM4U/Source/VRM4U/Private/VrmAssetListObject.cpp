@@ -62,3 +62,14 @@ void UVrmAssetListObject::CopyMember(UVrmAssetListObject *dst) const {
 	dst->BaseFileName = BaseFileName;
 	dst->HumanoidSkeletalMesh = HumanoidSkeletalMesh;
 }
+
+#if WITH_EDITORONLY_DATA
+
+void UVrmAssetListObject::WaitUntilAsyncPropertyReleased() const {
+	if (IsValid(SkeletalMesh) == false) {
+		return;
+	}
+	//SkeletalMesh->WaitUntilAsyncPropertyReleased(AsyncProperties);
+}
+
+#endif

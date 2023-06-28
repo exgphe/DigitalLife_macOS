@@ -5,6 +5,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "HttpModule.h"
+#include "Kismet/KismetStringLibrary.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -26,8 +27,11 @@ void FVersionUpdaterManager::Update()
 	FServerRequestInfo RequestInfo = FCountServerlessWrapper::MakeServerRequestInfo();
 	auto ProjectInfo = FCountServerlessWrapper::MakeCurrentProject();
 	ProjectInfo.PluginVersion = FString::Printf(TEXT("%d.%d"),GToolMainVersion,GToolPatchVersion);
-	Counter->Init(RequestInfo,ProjectInfo);
-	Counter->Processor();
+	if(GetDefault<UHotPatcherSettings>()->bServerlessCounter)
+	{
+		Counter->Init(RequestInfo,ProjectInfo);
+		Counter->Processor();
+	}
 }
 
 void FVersionUpdaterManager::RequestRemoveVersion(const FString& URL)
@@ -73,7 +77,6 @@ void FVersionUpdaterManager::OnRequestComplete(FHttpRequestPtr RequestPtr, FHttp
 					RemoteVersion.Website = ToolJsonObject->Get()->GetStringField(TEXT("Website"));
 					RemoteVersion.b3rdMods = ToolJsonObject->Get()->GetBoolField(TEXT("3rdMods"));
 					ToolJsonObject->Get()->TryGetNumberField(TEXT("PatchVersion"),RemoteVersion.PatchVersion);
-					const TSharedPtr<FJsonObject>& Actions = ToolJsonObject->Get()->GetObjectField(TEXT("Actions"));
 					
 					auto GetActionArray = [](const TSharedPtr<FJsonObject>& ActionObject,const FString& Name)->TSet<FName>
 					{
@@ -91,11 +94,50 @@ void FVersionUpdaterManager::OnRequestComplete(FHttpRequestPtr RequestPtr, FHttp
 					};
 					TArray<FString> ActionsName;
 					
-					if(Actions->TryGetStringArrayField(TEXT("ActionNames"),ActionsName))
+					const TSharedPtr<FJsonObject>* Actions;
+					if(ToolJsonObject->Get()->TryGetObjectField(TEXT("Actions"),Actions))
 					{
-						for(auto Name:ActionsName)
+						if(Actions && (*Actions)->TryGetStringArrayField(TEXT("ActionNames"),ActionsName))
 						{
-							RemoteVersion.ActiveActions.Add(*Name,GetActionArray(Actions,*Name));
+							for(auto Name:ActionsName)
+							{
+								RemoteVersion.ActiveActions.Add(*Name,GetActionArray(*Actions,*Name));
+							}
+						}
+
+						const TArray<TSharedPtr<FJsonValue>>* ActionDescs = nullptr;
+						if(Actions && (*Actions)->TryGetArrayField(TEXT("ModsDesc"),ActionDescs))
+						{
+							for(const TSharedPtr<FJsonValue>& ModDescJsonValue:*ActionDescs)
+							{
+								const TSharedPtr<FJsonObject>& ModDescJsonObject = ModDescJsonValue.Get()->AsObject();
+								FChildModDesc ModDesc;
+								ModDescJsonObject->TryGetStringField(TEXT("ModName"),ModDesc.ModName);
+
+								auto ReadFloatValue = [](const TSharedPtr<FJsonObject>& ModDescJsonObject,const FString& Name)->float
+								{
+									float Result = 0.f;
+									FString ValueStr;
+									if(ModDescJsonObject->TryGetStringField(Name,ValueStr))
+									{
+										Result = UKismetStringLibrary::Conv_StringToFloat(ValueStr);
+									}
+									return Result;
+								};
+								
+								ModDesc.RemoteVersion = ReadFloatValue(ModDescJsonObject,TEXT("Version"));
+								ModDesc.MinToolVersion = ReadFloatValue(ModDescJsonObject,TEXT("MinToolVersion"));
+								ModDescJsonObject->TryGetStringField(TEXT("Desc"),ModDesc.Description);
+								ModDescJsonObject->TryGetStringField(TEXT("URL"),ModDesc.URL);
+								ModDescJsonObject->TryGetStringField(TEXT("UpdateURL"),ModDesc.UpdateURL);
+								ModDescJsonObject->TryGetBoolField(TEXT("bIsBuiltInMod"),ModDesc.bIsBuiltInMod);
+								
+								if(ModCurrentVersionGetter)
+								{
+									ModDesc.CurrentVersion = ModCurrentVersionGetter(ModDesc.ModName);
+								}
+								RemoteVersion.ModsDesc.Add(*ModDesc.ModName,ModDesc);
+							}
 						}
 					}
 					Remotes.Add(*ToolName,RemoteVersion);

@@ -34,6 +34,13 @@ DECLARE_DELEGATE_OneParam(FOnPlayedAudioDataReleaseResultNative, bool);
 DECLARE_DYNAMIC_DELEGATE_OneParam(FOnPlayedAudioDataReleaseResult, bool, bSucceeded);
 
 
+/** Static delegate broadcast newly populated PCM data */
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnPopulateAudioDataNative, const TArray<float>&);
+
+/** Dynamic delegate broadcast newly populated PCM data */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPopulateAudioData, const TArray<float>&, PopulatedAudioData);
+
+
 /**
  * Imported sound wave. Assumed to be dynamically populated once from the decoded audio data.
  * Audio data preparation takes place in the Runtime Audio Importer library
@@ -165,6 +172,28 @@ public:
 	 */
 	bool RewindPlaybackTime_Internal(float PlaybackTime);
 
+	// TODO: Make this async
+	/**
+	 * Resample the sound wave to the specified sample rate
+	 *
+	 * @note This is not thread-safe at the moment
+	 * @param NewSampleRate The new sample rate
+	 * @return Whether the sound wave was resampled or not
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Main")
+	bool ResampleSoundWave(int32 NewSampleRate);
+
+	// TODO: Make this async
+	/**
+	 * Change the number of channels of the sound wave
+	 *
+	 * @note This is not thread-safe at the moment
+	 * @param NewNumOfChannels The new number of channels
+	 * @return Whether the sound wave was mixed or not
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Main")
+	bool MixSoundWaveChannels(int32 NewNumOfChannels);
+
 	/**
 	 * Change the number of frames played back. Used to rewind the sound
 	 *
@@ -226,7 +255,7 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Info")
 	virtual float GetDuration()
-#if ENGINE_MAJOR_VERSION < 5
+#if UE_VERSION_OLDER_THAN(5, 0, 0)
 	override;
 #else
 	const override;
@@ -237,6 +266,12 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Info")
 	int32 GetSampleRate() const;
+
+	/**
+	 * Get number of channels
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Info")
+	int32 GetNumOfChannels() const;
 
 	/**
 	 * Get the current sound playback percentage, 0-100%
@@ -299,10 +334,26 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Imported Sound Wave|Delegates")
 	FOnGeneratePCMData OnGeneratePCMData;
 
+	/** Bind to this delegate to obtain audio data every time it is populated. Suitable for use in C++ */
+	FOnPopulateAudioDataNative OnPopulateAudioDataNative;
+
+	/** Bind to this delegate to obtain audio data every time it is populated */
+	UPROPERTY(BlueprintAssignable, Category = "Imported Sound Wave|Delegates")
+	FOnPopulateAudioData OnPopulateAudioData;
+
 	/**
-	 * Get immutable PCM buffer. Use PopulateAudioDataFromDecodedInfo to populate it
+	 * Retrieve the PCM buffer, completely thread-safe. Suitable for use in Blueprints
 	 *
-	 * @return PCM buffer
+	 * @return PCM buffer in 32-bit float format
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Imported Sound Wave|Info", meta = (DisplayName = "Get PCM Buffer"))
+	TArray<float> GetPCMBufferCopy();
+
+	/**
+	 * Get immutable PCM buffer. Use DataGuard to make it thread safe
+	 * Use PopulateAudioDataFromDecodedInfo to populate it
+	 *
+	 * @return PCM buffer in 32-bit float format
 	 */
 	const FPCMStruct& GetPCMBuffer() const;
 

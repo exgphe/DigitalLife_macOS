@@ -88,7 +88,9 @@ void CommandletHelper::MainTick(TFunction<bool()> IsRequestExit)
 	// main loop
 	FDateTime LastConnectionTime = FDateTime::UtcNow();
 
-	while (GIsRunning && !IsRequestingExit() && !IsRequestExit())
+	while (GIsRunning &&
+		// !IsRequestingExit() &&
+		!IsRequestExit())
 	{
 		GEngine->UpdateTimeAndHandleMaxTickRate();
 		GEngine->Tick(FApp::GetDeltaTime(), false);
@@ -180,3 +182,17 @@ TArray<FString> CommandletHelper::GetCookCommandletTargetPlatformName()
 
 	return result;
 }
+
+
+void CommandletHelper::ModifyTargetPlatforms(const FString& InParams,const FString& InToken,TArray<ETargetPlatform>& OutTargetPlatforms,bool Replace)
+{
+	TArray<ETargetPlatform> TargetPlatforms = CommandletHelper::ParserPlatforms(InParams,InToken);
+	if(TargetPlatforms.Num())
+	{
+		if(Replace){
+			OutTargetPlatforms = TargetPlatforms;
+		}else{
+			for(ETargetPlatform Platform:TargetPlatforms){ OutTargetPlatforms.AddUnique(Platform); }
+		}
+	}
+};

@@ -27,7 +27,11 @@
 #include "HAL/FileManager.h"
 #include "PakFileUtilities.h"
 #include "Kismet/KismetTextLibrary.h"
+#include "Misc/EngineVersionComparison.h"
 
+#if !UE_VERSION_OLDER_THAN(5,1,0)
+	typedef FAppStyle FEditorStyle;
+#endif
 
 #define LOCTEXT_NAMESPACE "SHotPatcherCreatePatch"
 
@@ -467,61 +471,15 @@ EVisibility SHotPatcherPatchWidget::VisibilityPreviewChunkButtons() const
 }
 bool SHotPatcherPatchWidget::CanExportPatch()const
 {
-	bool bCanExport = false;
-	if (ExportPatchSetting)
-	{
-		bool bHasBase = false;
-		if (ExportPatchSetting->IsByBaseVersion())
-			bHasBase = !ExportPatchSetting->GetBaseVersion().IsEmpty() && FPaths::FileExists(ExportPatchSetting->GetBaseVersion());
-		else
-			bHasBase = true;
-		bool bHasVersionId = !ExportPatchSetting->GetVersionId().IsEmpty();
-		bool bHasFilter = !!ExportPatchSetting->GetAssetIncludeFilters().Num();
-		bool bHasSpecifyAssets = !!ExportPatchSetting->GetIncludeSpecifyAssets().Num();
-		// bool bHasExternFiles = !!ExportPatchSetting->GetAddExternFiles().Num();
-		// bool bHasExDirs = !!ExportPatchSetting->GetAddExternDirectory().Num();
-		bool bHasExternFiles = true;
-		if(GetDefault<UHotPatcherSettings>()->bExternalFilesCheck)
-		{
-			bHasExternFiles = !!ExportPatchSetting->GetAllPlatfotmExternFiles().Num();
-		}
-		
-		bool bHasExDirs = !!ExportPatchSetting->GetAddExternAssetsToPlatform().Num();
-		bool bHasSavePath = !ExportPatchSetting->GetSaveAbsPath().IsEmpty();
-		bool bHasPakPlatfotm = !!ExportPatchSetting->GetPakTargetPlatforms().Num();
-		
-		bool bHasAnyPakFiles = (
-			bHasFilter || bHasSpecifyAssets || bHasExternFiles || bHasExDirs ||
-			ExportPatchSetting->IsIncludeEngineIni() ||
-			ExportPatchSetting->IsIncludePluginIni() ||
-			ExportPatchSetting->IsIncludeProjectIni()
-			);
-		bCanExport = bHasBase && bHasVersionId && bHasAnyPakFiles && bHasPakPlatfotm && bHasSavePath;
-	}
-	return bCanExport;
+	return UFlibPatchParserHelper::IsValidPatchSettings(ExportPatchSetting.Get(),GetDefault<UHotPatcherSettings>()->bExternalFilesCheck);
 }
 
 FReply SHotPatcherPatchWidget::DoExportPatch()
 {
-	if(!GetConfigSettings()->IsStandaloneMode())
-	{
-		UPatcherProxy* PatcherProxy = NewObject<UPatcherProxy>();
-		PatcherProxy->AddToRoot();
-		PatcherProxy->Init(ExportPatchSetting.Get());
-		PatcherProxy->OnShowMsg.AddRaw(this,&SHotPatcherPatchWidget::ShowMsg);
-		PatcherProxy->DoExport();
-	}
-	else
-	{
-		FString CurrentConfig;
-		THotPatcherTemplateHelper::TSerializeStructAsJsonString(*GetConfigSettings(),CurrentConfig);
-		FString SaveConfigTo = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(),TEXT("HotPatcher"),TEXT("PatchConfig.json")));
-		FFileHelper::SaveStringToFile(CurrentConfig,*SaveConfigTo);
-		FString ProfilingCmd = GetConfigSettings()->IsEnableProfiling() ? TEXT("-trace=cpu,loadtimetrace") : TEXT("");
-		FString MissionCommand = FString::Printf(TEXT("\"%s\" -run=HotPatcher -config=\"%s\" %s %s"),*UFlibPatchParserHelper::GetProjectFilePath(),*SaveConfigTo,*GetConfigSettings()->GetCombinedAdditionalCommandletArgs(),*ProfilingCmd);
-		UE_LOG(LogHotPatcher,Log,TEXT("HotPatcher %s Mission: %s %s"),*GetMissionName(),*UFlibHotPatcherCoreHelper::GetUECmdBinary(),*MissionCommand);
-		FHotPatcherEditorModule::Get().RunProcMission(UFlibHotPatcherCoreHelper::GetUECmdBinary(),MissionCommand,GetMissionName());
-	}
+	TSharedPtr<FExportPatchSettings> PatchSettings = MakeShareable(new FExportPatchSettings);
+	*PatchSettings = *GetConfigSettings();
+	FHotPatcherEditorModule::Get().CookAndPakByPatchSettings(PatchSettings,PatchSettings->IsStandaloneMode());
+
 	return FReply::Handled();
 }
 

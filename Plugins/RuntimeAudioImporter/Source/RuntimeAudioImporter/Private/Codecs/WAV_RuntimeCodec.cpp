@@ -7,6 +7,7 @@
 
 #define INCLUDE_WAV
 #include "CodecIncludes.h"
+#include "Codecs/RAW_RuntimeCodec.h"
 #undef INCLUDE_WAV
 
 namespace
@@ -109,7 +110,7 @@ bool FWAV_RuntimeCodec::GetHeaderInfo(FEncodedAudioStruct EncodedData, FRuntimeA
 		HeaderInfo.Duration = static_cast<float>(WAV.totalPCMFrameCount) / WAV.sampleRate;
 		HeaderInfo.NumOfChannels = WAV.channels;
 		HeaderInfo.SampleRate = WAV.sampleRate;
-		HeaderInfo.PCMDataSize = WAV.totalPCMFrameCount * WAV.channels * sizeof(float);
+		HeaderInfo.PCMDataSize = WAV.totalPCMFrameCount * WAV.channels;
 		HeaderInfo.AudioFormat = GetAudioFormat();
 	}
 
@@ -127,10 +128,10 @@ bool FWAV_RuntimeCodec::Encode(FDecodedAudioStruct DecodedData, FEncodedAudioStr
 	drwav_data_format WAV_Format;
 	{
 		WAV_Format.container = drwav_container_riff;
-		WAV_Format.format = DR_WAVE_FORMAT_IEEE_FLOAT;
+		WAV_Format.format = DR_WAVE_FORMAT_PCM;
 		WAV_Format.channels = DecodedData.SoundWaveBasicInfo.NumOfChannels;
 		WAV_Format.sampleRate = DecodedData.SoundWaveBasicInfo.SampleRate;
-		WAV_Format.bitsPerSample = 32;
+		WAV_Format.bitsPerSample = 16;
 	}
 
 	void* CompressedData = nullptr;
@@ -142,12 +143,16 @@ bool FWAV_RuntimeCodec::Encode(FDecodedAudioStruct DecodedData, FEncodedAudioStr
 		return false;
 	}
 
-	drwav_write_pcm_frames(&WAV_Encoder, DecodedData.PCMInfo.PCMNumOfFrames, DecodedData.PCMInfo.PCMData.GetView().GetData());
+	int16* TempInt16BBuffer;
+	FRAW_RuntimeCodec::TranscodeRAWData<float, int16>(DecodedData.PCMInfo.PCMData.GetView().GetData(), DecodedData.PCMInfo.PCMData.GetView().Num(), TempInt16BBuffer);
+
+	drwav_write_pcm_frames(&WAV_Encoder, DecodedData.PCMInfo.PCMNumOfFrames, TempInt16BBuffer);
 	drwav_uninit(&WAV_Encoder);
+	FMemory::Free(TempInt16BBuffer);
 
 	// Populating the encoded audio data
 	{
-		EncodedData.AudioData = FRuntimeBulkDataBuffer<uint8>(static_cast<uint8*>(CompressedData), CompressedDataLen);
+		EncodedData.AudioData = FRuntimeBulkDataBuffer<uint8>(static_cast<uint8*>(CompressedData), static_cast<int64>(CompressedDataLen));
 		EncodedData.AudioFormat = ERuntimeAudioFormat::Wav;
 	}
 
@@ -179,7 +184,6 @@ bool FWAV_RuntimeCodec::Decode(FEncodedAudioStruct EncodedData, FDecodedAudioStr
 
 	// Allocating memory for PCM data
 	float* TempPCMData = static_cast<float*>(FMemory::Malloc(WAV_Decoder.totalPCMFrameCount * WAV_Decoder.channels * sizeof(float)));
-
 	if (!TempPCMData)
 	{
 		UE_LOG(LogRuntimeAudioImporter, Error, TEXT("Failed to allocate memory for WAV Decoder"));
@@ -190,7 +194,7 @@ bool FWAV_RuntimeCodec::Decode(FEncodedAudioStruct EncodedData, FDecodedAudioStr
 	DecodedData.PCMInfo.PCMNumOfFrames = drwav_read_pcm_frames_f32(&WAV_Decoder, WAV_Decoder.totalPCMFrameCount, TempPCMData);
 
 	// Getting PCM data size
-	const int64 TempPCMDataSize = static_cast<int64>(DecodedData.PCMInfo.PCMNumOfFrames * WAV_Decoder.channels * sizeof(float));
+	const int64 TempPCMDataSize = static_cast<int64>(DecodedData.PCMInfo.PCMNumOfFrames * WAV_Decoder.channels);
 
 	DecodedData.PCMInfo.PCMData = FRuntimeBulkDataBuffer<float>(TempPCMData, TempPCMDataSize);
 

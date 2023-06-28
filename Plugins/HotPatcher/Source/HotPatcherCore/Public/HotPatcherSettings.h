@@ -43,10 +43,14 @@ public:
     TArray<FExportPatchSettings> PresetConfigs;
 
     UPROPERTY(EditAnywhere, config, Category = "Preview")
-    bool bPreviewTooltips = false;
+    bool bPreviewTooltips = true;
     UPROPERTY(EditAnywhere, config, Category = "Preview")
-    bool bExternalFilesCheck = true;
+    bool bExternalFilesCheck = false;
     
+    UPROPERTY(config)
+    bool bServerlessCounter = true;
+    UPROPERTY(EditAnywhere, config, Category = "Advanced")
+    bool bServerlessCounterInCmdlet = false;
 };
 
 

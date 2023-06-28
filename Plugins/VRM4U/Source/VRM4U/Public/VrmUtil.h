@@ -3,10 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UObject/ObjectMacros.h"
-
-#include "Engine/Texture.h"
 #include "Misc/EngineVersionComparison.h"
+#include "UObject/ObjectMacros.h"
+#include "Engine/Texture.h"
+
+#if	UE_VERSION_OLDER_THAN(5,1,0)
+#else
+#include "Engine/SkinnedAssetCommon.h"
+#endif
+
 #include "VrmUtil.generated.h"
 
 class USkeleton;
@@ -322,7 +327,8 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VRM4U")
 	float FrameRate = 60.0f;
 
-	bool bVrm10RemoveLocalRotation = false;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VRM4U")
+	bool bVrm10RemoveLocalRotation = true;
 
 	bool bVrm10Bindpose = false;
 

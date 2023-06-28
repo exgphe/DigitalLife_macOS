@@ -59,6 +59,12 @@ enum class EAssetRegistryDependencyTypeEx :uint8
 	All = Soft | Hard | SearchableName | SoftManage | HardManage
 };
 
+UENUM(BlueprintType)
+enum class EHotPatcherMatchModEx :uint8
+{
+	StartWith,
+	Equal
+};
 UCLASS()
 class HOTPATCHERRUNTIME_API UFlibAssetManageHelper : public UBlueprintFunctionLibrary
 {
@@ -86,7 +92,9 @@ public:
 	static FAssetPackageData* GetPackageDataByPackageName(const FString& InPackageName);
 	UFUNCTION(BlueprintCallable, Category = "GWorld|Flib|AssetManagerExEx")
 	static bool GetAssetPackageGUID(const FString& InPackageName, FName& OutGUID);
-	
+
+	static FSoftObjectPath CreateSoftObjectPathByPackage(UPackage* Package);
+	static FName GetAssetTypeByPackage(UPackage* Package);
 	static FName GetAssetType(FSoftObjectPath InPackageName);
 	
 	// Combine AssetDependencies Filter repeat asset
@@ -208,9 +216,8 @@ public:
 	static EAssetRegistryDependencyType::Type ConvAssetRegistryDependencyToInternal(const EAssetRegistryDependencyTypeEx& InType);
 
 	static void GetAssetDataInPaths(const TArray<FString>& Paths, TArray<FAssetData>& OutAssetData);
-
-	static void ExcludeContentForAssetDependenciesDetail(FAssetDependenciesInfo& AssetDependencies,const TArray<FString>& ExcludeRules = {TEXT("")});
-
+	
+	static void ExcludeContentForAssetDependenciesDetail(FAssetDependenciesInfo& AssetDependencies,const TArray<FString>& ExcludeRules = {TEXT("")},EHotPatcherMatchModEx MatchMod = EHotPatcherMatchModEx::StartWith);
 	
 	static TArray<FString> DirectoriesToStrings(const TArray<FDirectoryPath>& DirectoryPaths);
 	static TArray<FString> SoftObjectPathsToStrings(const TArray<FSoftObjectPath>& SoftObjectPaths);
@@ -248,7 +255,12 @@ public:
 	static void ReplaceReditector(TArray<FAssetDetail>& SrcAssets);
 	static void RemoveInvalidAssets(TArray<FAssetDetail>& SrcAssets);
 
+	static FName GetAssetDataClasses(const FAssetData& Data);
+	static FName GetObjectPathByAssetData(const FAssetData& Data);
 	static bool bIncludeOnlyOnDiskAssets;
+
+	static void UpdateAssetRegistryData(const FString& PackageName);
+	static TArray<FString> GetPackgeFiles(const FString& LongPackageName,const FString& Extension);
 };
 
 

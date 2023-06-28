@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
+#include "Engine/SkeletalMesh.h"
 #include "VrmImportMaterialSet.h"
 #include "VrmUtil.h"
 #include "VrmAssetListObject.generated.h"
@@ -199,7 +200,44 @@ public:
 
 	TArray<bool> MaterialHasAlphaCutoff;
 
+	TArray<bool> MaterialHasMToon;
+
 	TSharedPtr<FReturnedData> MeshReturnedData;
 	//FReturnedData *Result;
+
+#if WITH_EDITORONLY_DATA
+
+//#if	UE_VERSION_OLDER_THAN(5,0,0)
+//	typedef LocalImportData UAssetImportData;
+//#else
+//	typedef LocalImportData TObjectPtr<class UAssetImportData>
+//#endif
+
+	// Import data for this 
+	void WaitUntilAsyncPropertyReleased() const;
+
+	//UPROPERTY(VisibleAnywhere, Instanced, Category = ImportSettings)
+#if	UE_VERSION_OLDER_THAN(5,0,0)
+	class UAssetImportData* AssetImportData = nullptr;
+#else
+	TObjectPtr<class UAssetImportData> AssetImportData;
+#endif
+
+	class UAssetImportData* GetAssetImportData() const
+	{
+		//WaitUntilAsyncPropertyReleased(ESkeletalMeshAsyncProperties::AssetImportData);
+		PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			return AssetImportData;
+		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	}
+
+	void SetAssetImportData(class UAssetImportData* InAssetImportData)
+	{
+		//WaitUntilAsyncPropertyReleased(ESkeletalMeshAsyncProperties::AssetImportData);
+		PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			AssetImportData = InAssetImportData;
+		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	}
+#endif
 
 };

@@ -73,7 +73,7 @@ controlPin = None
 while(len(hierarchy.get_bones()) > 0):
     e = hierarchy.get_bones()[-1]
     h_con.remove_all_parents(e)
-    h_con.remove_element(e)
+    #h_con.remove_element(e)
 
 h_con.import_bones(unreal.ControlRigBlueprintLibrary.get_preview_mesh(rig).skeleton)
 

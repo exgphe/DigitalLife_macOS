@@ -229,6 +229,14 @@ class VRM4U_API UVrmMetaObject : public UObject
 	GENERATED_BODY()
 	
 public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Rendering)
+	int Version = 0;
+
+	UFUNCTION(BlueprintPure, Category = "VRM4U")
+	int GetVRMVersion() const {
+		return Version;
+	}
+
 	// humanoid name -> model name
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Rendering)
 	TMap<FString, FString> humanoidBoneTable;
@@ -253,4 +261,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Rendering)
 	class UVrmAssetListObject *VrmAssetListObject;
+
+
 };

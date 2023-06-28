@@ -6,6 +6,10 @@
 #include "Math/UnrealMathUtility.h"
 #include "HAL/UnrealMemory.h"
 #include "RuntimeAudioImporterDefines.h"
+#include "SampleBuffer.h"
+#include "AudioResampler.h"
+#include <type_traits>
+#include <limits>
 
 class RUNTIMEAUDIOIMPORTER_API FRAW_RuntimeCodec
 {
@@ -16,33 +20,52 @@ public:
 	 * @note Key - Minimum, Value - Maximum
 	 */
 	template <typename IntegralType>
-	static TTuple<double, double> GetRawMinAndMaxValues()
+	static TTuple<long long, long long> GetRawMinAndMaxValues()
 	{
-		/** Signed 16-bit PCM */
-		if (TIsSame<IntegralType, int16>::Value)
+		// Signed 8-bit integer
+		if (std::is_same<IntegralType, int8>::value)
 		{
-			return TTuple<double, double>(-32767.f, 32768.f);
+			return TTuple<long long, long long>(std::numeric_limits<int8>::min(), std::numeric_limits<int8>::max());
 		}
 
-		/** Signed 32-bit PCM */
-		if (TIsSame<IntegralType, int32>::Value)
+		// Unsigned 8-bit integer
+		if (std::is_same<IntegralType, uint8>::value)
 		{
-			return TTuple<double, double>(-2147483648.f, 2147483647.f);
+			return TTuple<long long, long long>(std::numeric_limits<uint8>::min(), std::numeric_limits<uint8>::max());
 		}
 
-		/** Unsigned 8-bit PCM */
-		if (TIsSame<IntegralType, uint8>::Value)
+		// Signed 16-bit integer
+		if (std::is_same<IntegralType, int16>::value)
 		{
-			return TTuple<double, double>(0.f, 255.f);
+			return TTuple<long long, long long>(std::numeric_limits<int16>::min(), std::numeric_limits<int16>::max());
 		}
 
-		/** 32-bit float */
-		if (TIsSame<IntegralType, float>::Value)
+		// Unsigned 16-bit integer
+		if (std::is_same<IntegralType, uint16>::value)
 		{
-			return TTuple<double, double>(-1.f, 1.f);
+			return TTuple<long long, long long>(std::numeric_limits<uint16>::min(), std::numeric_limits<uint16>::max());
 		}
 
-		return TTuple<double, double>(-1.f, 1.f);
+		// Signed 32-bit integer
+		if (std::is_same<IntegralType, int32>::value)
+		{
+			return TTuple<long long, long long>(std::numeric_limits<int32>::min(), std::numeric_limits<int32>::max());
+		}
+
+		// Unsigned 32-bit integer
+		if (std::is_same<IntegralType, uint32>::value)
+		{
+			return TTuple<long long, long long>(std::numeric_limits<uint32>::min(), std::numeric_limits<uint32>::max());
+		}
+
+		// Floating point 32-bit
+		if (std::is_same<IntegralType, float>::value)
+		{
+			return TTuple<long long, long long>(-1, 1);
+		}
+
+		ensureMsgf(false, TEXT("Unsupported RAW format"));
+		return TTuple<long long, long long>(0, 0);
 	}
 
 	/**
@@ -55,51 +78,91 @@ public:
 	static void TranscodeRAWData(const TArray64<uint8>& RAWData_From, TArray64<uint8>& RAWData_To)
 	{
 		const IntegralTypeFrom* DataFrom = reinterpret_cast<const IntegralTypeFrom*>(RAWData_From.GetData());
-		const int64 DataFrom_Size = RAWData_From.Num();
+		const int64 RawDataSize = RAWData_From.Num() / sizeof(IntegralTypeFrom);
 
 		IntegralTypeTo* DataTo = nullptr;
-		int64 DataTo_Size = 0;
+		TranscodeRAWData<IntegralTypeFrom, IntegralTypeTo>(DataFrom, RawDataSize, DataTo);
 
-		TranscodeRAWData<IntegralTypeFrom, IntegralTypeTo>(DataFrom, DataFrom_Size, DataTo, DataTo_Size);
-
-		RAWData_To = TArray64<uint8>(reinterpret_cast<uint8*>(DataTo), DataTo_Size);
-
+		RAWData_To = TArray64<uint8>(reinterpret_cast<uint8*>(DataTo), RawDataSize * sizeof(IntegralTypeTo));
 		FMemory::Free(DataTo);
 	}
 
 	/**
 	 * Transcoding one RAW Data format to another
 	 *
-	 * @param RAWData_From Pointer to memory location of the RAW data for transcoding
-	 * @param RAWDataSize_From Memory size allocated for the RAW data
-	 * @param RAWData_To Pointer to memory location of the transcoded RAW data with the specified format
-	 * @param RAWDataSize_To Memory size allocated for the RAW data
+	 * @param RAWDataFrom Pointer to memory location of the RAW data for transcoding
+	 * @param NumOfSamples Number of samples in the RAW data
+	 * @param RAWDataTo Pointer to memory location of the transcoded RAW data with the specified format. The number of samples is RAWDataSize
 	 */
 	template <typename IntegralTypeFrom, typename IntegralTypeTo>
-	static void TranscodeRAWData(const IntegralTypeFrom* RAWData_From, int64 RAWDataSize_From, IntegralTypeTo*& RAWData_To, int64& RAWDataSize_To)
+	static void TranscodeRAWData(const IntegralTypeFrom* RAWDataFrom, int64 NumOfSamples, IntegralTypeTo*& RAWDataTo)
 	{
-		/** Getting the required number of samples to transcode */
-		const uint64 NumSamples = RAWDataSize_From / sizeof(IntegralTypeFrom);
-
-		/** Getting the required PCM size */
-		RAWDataSize_To = NumSamples * sizeof(IntegralTypeTo);
-
 		/** Creating an empty PCM buffer */
-		IntegralTypeTo* TempPCMData = static_cast<IntegralTypeTo*>(FMemory::Malloc(RAWDataSize_To));
+		RAWDataTo = static_cast<IntegralTypeTo*>(FMemory::Malloc(NumOfSamples * sizeof(IntegralTypeTo)));
 
-		const TTuple<double, double> MinAndMaxValuesFrom{GetRawMinAndMaxValues<IntegralTypeFrom>()};
-		const TTuple<double, double> MinAndMaxValuesTo{GetRawMinAndMaxValues<IntegralTypeTo>()};
+		const TTuple<long long, long long> MinAndMaxValuesFrom{GetRawMinAndMaxValues<IntegralTypeFrom>()};
+		const TTuple<long long, long long> MinAndMaxValuesTo{GetRawMinAndMaxValues<IntegralTypeTo>()};
 
 		/** Iterating through the RAW Data to transcode values using a divisor */
-		for (uint64 SampleIndex = 0; SampleIndex < NumSamples; ++SampleIndex)
+		for (int64 SampleIndex = 0; SampleIndex < NumOfSamples; ++SampleIndex)
 		{
-			TempPCMData[SampleIndex] = static_cast<IntegralTypeTo>(FMath::GetMappedRangeValueClamped(FVector2D(MinAndMaxValuesFrom.Key, MinAndMaxValuesFrom.Value), FVector2D(MinAndMaxValuesTo.Key, MinAndMaxValuesTo.Value), RAWData_From[SampleIndex]));
+			RAWDataTo[SampleIndex] = static_cast<IntegralTypeTo>(FMath::GetMappedRangeValueClamped(FVector2D(MinAndMaxValuesFrom.Key, MinAndMaxValuesFrom.Value), FVector2D(MinAndMaxValuesTo.Key, MinAndMaxValuesTo.Value), RAWDataFrom[SampleIndex]));
 		}
 
-		/** Returning the transcoded data as bytes */
-		RAWData_To = reinterpret_cast<IntegralTypeTo*>(TempPCMData);
-
-		UE_LOG(LogRuntimeAudioImporter, Log, TEXT("Transcoding RAW data of size '%llu' (min: %f, max: %f) to size '%llu' (min: %f, max: %f)"),
+		UE_LOG(LogRuntimeAudioImporter, Log, TEXT("Transcoding RAW data of size '%llu' (min: %lld, max: %lld) to size '%llu' (min: %lld, max: %lld)"),
 		       static_cast<uint64>(sizeof(IntegralTypeFrom)), MinAndMaxValuesFrom.Key, MinAndMaxValuesFrom.Value, static_cast<uint64>(sizeof(IntegralTypeTo)), MinAndMaxValuesTo.Key, MinAndMaxValuesTo.Value);
+	}
+
+	/**
+	 * Resampling RAW Data to a different sample rate
+	 *
+	 * @param RAWData RAW data for resampling
+	 * @param NumOfChannels Number of channels in the RAW data
+	 * @param SourceSampleRate Source sample rate of the RAW data
+	 * @param DestinationSampleRate Destination sample rate of the RAW data
+	 * @param ResampledRAWData Resampled RAW data
+	 * @return True if the RAW data was successfully resampled
+	 */
+	static bool ResampleRAWData(Audio::FAlignedFloatBuffer& RAWData, int32 NumOfChannels, int32 SourceSampleRate, int32 DestinationSampleRate, Audio::FAlignedFloatBuffer& ResampledRAWData)
+	{
+		const Audio::FResamplingParameters ResampleParameters = {
+			Audio::EResamplingMethod::BestSinc,
+			NumOfChannels,
+			static_cast<float>(SourceSampleRate),
+			static_cast<float>(DestinationSampleRate),
+			RAWData
+		};
+
+		ResampledRAWData.AddUninitialized(Audio::GetOutputBufferSize(ResampleParameters));
+		Audio::FResamplerResults ResampleResults;
+		ResampleResults.OutBuffer = &ResampledRAWData;
+
+		if (!Audio::Resample(ResampleParameters, ResampleResults))
+		{
+			UE_LOG(LogRuntimeAudioImporter, Error, TEXT("Unable to resample audio data from %d to %d"), SourceSampleRate, DestinationSampleRate);
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Mixing RAW Data to a different number of channels
+	 *
+	 * @param RAWData RAW data for mixing
+	 * @param SampleRate Sample rate of the RAW data
+	 * @param SourceNumOfChannels Source number of channels in the RAW data
+	 * @param DestinationNumOfChannels Destination number of channels in the RAW data
+	 * @param RemixedRAWData Remixed RAW data
+	 * @return True if the RAW data was successfully mixed
+	 */
+	static bool MixChannelsRAWData(Audio::FAlignedFloatBuffer& RAWData, int32 SampleRate, int32 SourceNumOfChannels, int32 DestinationNumOfChannels, Audio::FAlignedFloatBuffer& RemixedRAWData)
+	{
+		Audio::TSampleBuffer<float> PCMSampleBuffer(RAWData, SourceNumOfChannels, SampleRate);
+		{
+			PCMSampleBuffer.MixBufferToChannels(DestinationNumOfChannels);
+		}
+		RemixedRAWData = Audio::FAlignedFloatBuffer(PCMSampleBuffer.GetData(), PCMSampleBuffer.GetNumSamples());
+		return true;
 	}
 };

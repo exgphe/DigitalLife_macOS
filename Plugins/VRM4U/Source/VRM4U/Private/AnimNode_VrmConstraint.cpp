@@ -22,6 +22,7 @@ void FAnimNode_VrmConstraint::UpdateCache(FComponentSpacePoseContext& Output) {
 }
 
 void FAnimNode_VrmConstraint::Initialize_AnyThread(const FAnimationInitializeContext& Context) {
+	bCallInitialized = true;
 	Super::Initialize_AnyThread(Context);
 
 }
@@ -48,7 +49,11 @@ void FAnimNode_VrmConstraint::GatherDebugData(FNodeDebugData& DebugData)
 }
 
 void FAnimNode_VrmConstraint::EvaluateComponentPose_AnyThread(FComponentSpacePoseContext& Output) {
-	Super::EvaluateComponentPose_AnyThread(Output);
+	if (bCallByAnimInstance) {
+		ActualAlpha = 1.f;
+	} else {
+		Super::EvaluateComponentPose_AnyThread(Output);
+	}
 }
 
 void FAnimNode_VrmConstraint::EvaluateSkeletalControl_AnyThread(FComponentSpacePoseContext& Output, TArray<FBoneTransform>& OutBoneTransforms)
@@ -65,7 +70,12 @@ void FAnimNode_VrmConstraint::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 
 		int32 dstBoneIndex = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().FindBoneIndex(*(a.Key));
 		FCompactPoseBoneIndex dstPoseBoneIndex(dstBoneIndex);
-		auto dstRefTrans = Output.Pose.GetComponentSpaceTransform(dstPoseBoneIndex);
+		auto dstRefTrans = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().GetRefBonePose()[dstBoneIndex];
+		auto dstRefRot = dstRefTrans.GetRotation();
+
+		auto dstParentBoneIndex = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().GetParentIndex(dstBoneIndex);
+		FCompactPoseBoneIndex dstParentPoseBoneIndex(dstParentBoneIndex);
+		auto dstParentTrans = Output.Pose.GetComponentSpaceTransform(dstParentPoseBoneIndex);
 
 		int32 srcBoneIndex = -1;
 
@@ -80,7 +90,7 @@ void FAnimNode_VrmConstraint::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 			break;
 			case EVRMConstraintType::Aim :
 			{
-				auto& tmp = a.Value.constraintRotation;
+				auto& tmp = a.Value.constraintAim;
 				srcBoneIndex = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().FindBoneIndex(*(tmp.sourceName));
 			}
 			break;
@@ -97,17 +107,115 @@ void FAnimNode_VrmConstraint::EvaluateSkeletalControl_AnyThread(FComponentSpaceP
 		}
 		FCompactPoseBoneIndex srcPoseBoneIndex(srcBoneIndex);
 		auto srcRefTrans = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().GetRefBonePose()[srcBoneIndex];
+		auto srcRefRot = srcRefTrans.GetRotation();
+
+		auto srcParentBoneIndex = Output.AnimInstanceProxy->GetSkeleton()->GetReferenceSkeleton().GetParentIndex(srcBoneIndex);
+		FCompactPoseBoneIndex srcParentPoseBoneIndex(srcParentBoneIndex);
+		auto srcParentTrans = Output.Pose.GetComponentSpaceTransform(srcParentPoseBoneIndex);
+
 
 		if (a.Value.type == EVRMConstraintType::Rotation) {
 			auto& rot = a.Value.constraintRotation;
 
-			auto st = Output.Pose.GetComponentSpaceTransform(srcPoseBoneIndex);
-			auto dt = Output.Pose.GetComponentSpaceTransform(dstPoseBoneIndex);
+			auto srcCurrentTrans = Output.Pose.GetLocalSpaceTransform(srcPoseBoneIndex);
+			auto srcCurrentRot = srcCurrentTrans.GetRotation();
 
-			//rot.weight
+			auto dstCurrentTrans = Output.Pose.GetComponentSpaceTransform(dstPoseBoneIndex);
+			auto dstCurrentRot = dstCurrentTrans.GetRotation();
 
-			dt.SetRotation(st.GetRotation());
-			Output.Pose.SetComponentSpaceTransform(dstPoseBoneIndex, dt);
+			{
+				auto r = (srcRefRot.Inverse() * srcCurrentRot);
+				FVector axis;
+				decltype(FVector::X) angle;
+				r.ToAxisAndAngle(axis, angle);
+				r = FQuat(axis, angle * rot.weight);
+				r = dstParentTrans.GetRotation() * dstRefRot * r;
+
+				dstCurrentTrans.SetRotation(r);
+				Output.Pose.SetComponentSpaceTransform(dstPoseBoneIndex, dstCurrentTrans);
+			}
+		}
+		if (a.Value.type == EVRMConstraintType::Roll) {
+			auto& roll = a.Value.constraintRoll;
+
+			auto srcCurrentTrans = Output.Pose.GetLocalSpaceTransform(srcPoseBoneIndex);
+			auto srcCurrentRot = srcCurrentTrans.GetRotation();
+
+			auto dstCurrentTrans = Output.Pose.GetComponentSpaceTransform(dstPoseBoneIndex);
+			auto dstCurrentRot = dstCurrentTrans.GetRotation();
+
+			{
+				auto r = (srcRefRot.Inverse() * srcCurrentRot);
+				FVector axis;
+				decltype(FVector::X) angle;
+				r.ToAxisAndAngle(axis, angle);
+
+				FVector v;
+				if (roll.rollAxis.Find("X") >= 0) {
+					v.Set(1, 0, 0);
+				}
+				if (roll.rollAxis.Find("Y") >= 0) {
+					v.Set(0, 1, 0);
+				}
+				if (roll.rollAxis.Find("Z") >= 0) {
+					v.Set(0, 0, 1);
+				}
+				if (roll.rollAxis.Find("negative") >= 0) {
+					v *= -1.f;
+				}
+				
+				auto d = FVector::DotProduct(axis, v);
+				r = FQuat(v, angle * roll.weight * d);
+
+				r = dstParentTrans.GetRotation() * dstRefRot * r;
+				dstCurrentTrans.SetRotation(r);
+				Output.Pose.SetComponentSpaceTransform(dstPoseBoneIndex, dstCurrentTrans);
+			}
+		}
+		if (a.Value.type == EVRMConstraintType::Aim) {
+			auto& aim = a.Value.constraintAim;
+
+			//auto srcCurrentTrans = Output.Pose.GetComponentSpaceTransform(srcPoseBoneIndex);
+			//auto srcCurrentRot = srcCurrentTrans.GetRotation();
+
+			//auto dstCurrentTrans = Output.Pose.GetComponentSpaceTransform(dstPoseBoneIndex);
+			auto dstCurrentTrans = dstRefTrans * dstParentTrans;
+			//auto dstCurrentRot = dstCurrentTrans.GetRotation();
+
+			{
+
+				FVector v;
+				if (aim.aimAxis.Find("X") >= 0) {
+					v.Set(1, 0, 0);
+				}
+				if (aim.aimAxis.Find("Y") >= 0) {
+					v.Set(0, 1, 0);
+				}
+				if (aim.aimAxis.Find("Z") >= 0) {
+					v.Set(0, 0, 1);
+				}
+				if (aim.aimAxis.Find("negative") >= 0) {
+					v *= -1.f;
+				}
+
+				auto fromVec = dstCurrentTrans.TransformVector(v);
+				auto toVec = srcParentTrans.TransformVector(v);
+				//auto toVec = (srcCurrentTrans.GetLocation() - srcRefTrans.GetLocation()).Normalize();
+				auto fromToQuat = FQuat::FindBetweenNormals(fromVec, toVec);
+
+				auto r = fromToQuat;
+
+				FVector axis;
+				decltype(FVector::X) angle;
+				r.ToAxisAndAngle(axis, angle);
+				r = FQuat(axis, angle * aim.weight);
+
+				r = dstCurrentTrans.GetRotation().Inverse() * r * dstCurrentTrans.GetRotation();
+
+				r = dstParentTrans.GetRotation() *  dstRefRot * r;
+				dstCurrentTrans.SetRotation(r);
+				Output.Pose.SetComponentSpaceTransform(dstPoseBoneIndex, dstCurrentTrans);
+			}
 		}
 	}
 }

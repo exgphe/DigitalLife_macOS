@@ -5,7 +5,7 @@
 #include "HotPatcherCore.h"
 #include "CreatePatch/FExportPatchSettings.h"
 #include "CreatePatch/FExportReleaseSettings.h"
-#include "ShaderPatch/FlibShaderCodeLibraryHelper.h"
+#include "ShaderLibUtils/FlibShaderCodeLibraryHelper.h"
 #include "ThreadUtils/FThreadUtils.hpp"
 
 // engine header
@@ -27,11 +27,15 @@
 #include "Serialization/ArrayWriter.h"
 #include "Settings/ProjectPackagingSettings.h"
 #include "ShaderCompiler.h"
+#include "Async/ParallelFor.h"
 #include "CreatePatch/PatcherProxy.h"
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceConstant.h"
 #include "ProfilingDebugging/LoadTimeTracker.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Misc/EngineVersionComparison.h"
+#include "Misc/CoreMisc.h"
+#include "DerivedDataCacheInterface.h"
 
 DEFINE_LOG_CATEGORY(LogHotPatcherCoreHelper);
 
@@ -67,12 +71,13 @@ void UFlibHotPatcherCoreHelper::CheckInvalidCookFilesByAssetDependenciesInfo(
 		
 		FAssetData CurrentAssetData;
 		UFlibAssetManageHelper::GetSingleAssetsData(AssetDetail.PackagePath.ToString(),CurrentAssetData);
-		if(!CurrentAssetData.GetAsset()->IsValidLowLevelFast())
-		{
-			UE_LOG(LogHotPatcherCoreHelper,Warning,TEXT("%s is invalid Asset Uobject"),*CurrentAssetData.PackageName.ToString());
-			continue;
-		}
-		if (CurrentAssetData.GetAsset()->HasAnyMarks(OBJECTMARK_EditorOnly))
+		
+		// if(!CurrentAssetData.GetAsset()->IsValidLowLevelFast())
+		// {
+		// 	UE_LOG(LogHotPatcherCoreHelper,Warning,TEXT("%s is invalid Asset Uobject"),*CurrentAssetData.PackageName.ToString());
+		// 	continue;
+		// }
+		if ((CurrentAssetData.PackageFlags & PKG_EditorOnly)!=0)
 		{
 			UE_LOG(LogHotPatcherCoreHelper,Warning,TEXT("Miss %s it's EditorOnly Assets!"),*CurrentAssetData.PackageName.ToString());
 			continue;
@@ -562,11 +567,7 @@ bool UFlibHotPatcherCoreHelper::CookPackage(
 		{
 			UE_LOG(LogHotPatcher,Warning,TEXT("Cook %s Failed! It is EditorOnly Package!"),*LongPackageName);
 		}
-		if(bIsFailedPackage)
-		{
-			CookActionCallback.OnAssetCooked(Package,ETargetPlatform::AllPlatforms,ESavePackageResult::Error);
-			return false;
-		}
+
 		
 		bool bUnversioned = true;
 		bool CookLinkerDiff = false;
@@ -586,6 +587,12 @@ bool UFlibHotPatcherCoreHelper::CookPackage(
 		
 		for(auto& Platform:CookPlatforms)
 		{
+			// if(bIsFailedPackage)
+			// {
+			// 	CookActionCallback.OnAssetCooked(Package,Platform,ESavePackageResult::Error);
+			// 	return false;
+			// }
+			
 			FFilterEditorOnlyFlag SetPackageEditorOnlyFlag(Package,Platform.Value);
 
 			FString PackageName = PackageFileName.IsNone() ? LongPackageName :PackageFileName.ToString();
@@ -593,6 +600,10 @@ bool UFlibHotPatcherCoreHelper::CookPackage(
 
 			ETargetPlatform TargetPlatform = Platform.Key;
 
+			/* for material cook
+			 * Illegal call to StaticFindObject() while serializing object data!
+			 * ![](https://img.imzlp.com/imgs/zlp/picgo/2022/202211121451617.png)
+			*/
 			if(!bStorageConcurrent)
 			{
 				TSet<UObject*> ProcessedObjs;
@@ -658,7 +669,11 @@ bool UFlibHotPatcherCoreHelper::CookPackage(
 				{
 					//const FAssetPackageData* AssetPackageData = UFlibAssetManageHelper::GetPackageDataByPackageName(Package->GetFName().ToString());
 					ICookedPackageWriter::FCommitPackageInfo Info;
+#if UE_VERSION_OLDER_THAN(5,1,0)
 					Info.bSucceeded = bSuccessed;
+#else
+					Info.Status = bSuccessed ? IPackageWriter::ECommitStatus::Success : IPackageWriter::ECommitStatus::Error;
+#endif
 					Info.PackageName = Package->GetFName();
 					// PRAGMA_DISABLE_DEPRECATION_WARNINGS
 					Info.PackageGuid = FGuid::NewGuid(); //AssetPackageData ? AssetPackageData->PackageGuid : FGuid::NewGuid();
@@ -938,44 +953,9 @@ FString UFlibHotPatcherCoreHelper::PatchSummary(const FPatchVersionDiff& DiffInf
 	return result;
 }
 
-
-FString UFlibHotPatcherCoreHelper::MakePakShortName(const FHotPatcherVersion& InCurrentVersion, const FChunkInfo& InChunkInfo, const FString& InPlatform,const FString& InRegular)
+FString UFlibHotPatcherCoreHelper::ReplacePakRegular(const FReplacePakRegular& RegularConf, const FString& InRegular)
 {
-	struct FResularOperator
-	{
-		FResularOperator(const FString& InName,TFunction<FString(void)> InOperator)
-			:Name(InName),Do(InOperator){}
-		FString Name;
-		TFunction<FString(void)> Do;
-	};
-	
-	TArray<FResularOperator> RegularOpList;
-	RegularOpList.Emplace(TEXT("{VERSION}"),[&InCurrentVersion]()->FString{return InCurrentVersion.VersionId;});
-	RegularOpList.Emplace(TEXT("{BASEVERSION}"),[&InCurrentVersion]()->FString{return InCurrentVersion.BaseVersionId;});
-	RegularOpList.Emplace(TEXT("{PLATFORM}"),[&InPlatform]()->FString{return InPlatform;});
-	RegularOpList.Emplace(TEXT("{CHUNKNAME}"),[&InChunkInfo,&InCurrentVersion]()->FString
-	{
-		if(!InCurrentVersion.VersionId.Equals(InChunkInfo.ChunkName))
-			return InChunkInfo.ChunkName;
-		else
-			return TEXT("");
-	});
-	
-	auto CustomPakNameRegular = [](const TArray<FResularOperator>& Operators,const FString& Regular)->FString
-	{
-		FString Result = Regular;
-		for(auto& Operator:Operators)
-		{
-			Result = Result.Replace(*Operator.Name,*(Operator.Do()));
-		}
-		while(Result.Contains(TEXT("__")))
-		{
-			Result = Result.Replace(TEXT("__"),TEXT("_"));
-		}
-		return Result;
-	};
-	
-	return CustomPakNameRegular(RegularOpList,InRegular);
+	return UFlibPatchParserHelper::ReplacePakRegular(RegularConf,InRegular);
 }
 
 bool UFlibHotPatcherCoreHelper::CheckSelectedAssetsCookStatus(const FString& OverrideCookedDir,const TArray<FString>& PlatformNames, const FAssetDependenciesInfo& SelectedAssets, FString& OutMsg)
@@ -1144,6 +1124,7 @@ ITargetPlatform* UFlibHotPatcherCoreHelper::GetPlatformByName(const FString& Nam
 
 FPatchVersionDiff UFlibHotPatcherCoreHelper::DiffPatchVersionWithPatchSetting(const FExportPatchSettings& PatchSetting, const FHotPatcherVersion& Base, const FHotPatcherVersion& New)
 {
+	SCOPED_NAMED_EVENT_TEXT("DiffPatchVersionWithPatchSetting",FColor::Red);
 	FPatchVersionDiff VersionDiffInfo;
 	const FAssetDependenciesInfo& BaseVersionAssetDependInfo = Base.AssetInfo;
 	const FAssetDependenciesInfo& CurrentVersionAssetDependInfo = New.AssetInfo;
@@ -1177,10 +1158,10 @@ FPatchVersionDiff UFlibHotPatcherCoreHelper::DiffPatchVersionWithPatchSetting(co
 	
 	if(PatchSetting.IsForceSkipContent())
 	{
-		TArray<FString> AllSkipContents;
-		AllSkipContents.Append(UFlibAssetManageHelper::DirectoriesToStrings(PatchSetting.GetForceSkipContentRules()));
-		AllSkipContents.Append(UFlibAssetManageHelper::SoftObjectPathsToStrings(PatchSetting.GetForceSkipAssets()));
-		UFlibPatchParserHelper::ExcludeContentForVersionDiff(VersionDiffInfo,AllSkipContents);
+		TArray<FString> AllSkipDirContents = UFlibAssetManageHelper::DirectoriesToStrings(PatchSetting.GetForceSkipContentRules());
+		UFlibPatchParserHelper::ExcludeContentForVersionDiff(VersionDiffInfo,AllSkipDirContents,EHotPatcherMatchModEx::StartWith);
+		TArray<FString> AllSkipAssets = UFlibAssetManageHelper::SoftObjectPathsToStrings(PatchSetting.GetForceSkipAssets());
+		UFlibPatchParserHelper::ExcludeContentForVersionDiff(VersionDiffInfo,AllSkipAssets,EHotPatcherMatchModEx::Equal);
 	}
 	// clean deleted asset info in patch
 	if(PatchSetting.IsIgnoreDeletedAssetsInfo())
@@ -1598,8 +1579,9 @@ void UFlibHotPatcherCoreHelper::AppendPakCommandOptions(TArray<FString>& OriginC
 	const TArray<FString>& Options, bool bAppendAllMatch, const TArray<FString>& AppendFileExtersions,
 	const TArray<FString>& IgnoreFormats, const TArray<FString>& InIgnoreOptions)
 {
-	for(auto& Command:OriginCommands)
+	ParallelFor(OriginCommands.Num(),[&](int32 index)
 	{
+		FString& Command = OriginCommands[index];
 		FString PakOptionsStr;
 		for (const auto& Param : Options)
 		{
@@ -1618,7 +1600,7 @@ void UFlibHotPatcherCoreHelper::AppendPakCommandOptions(TArray<FString>& OriginC
 			PakOptionsStr += AppendOptionStr;
 		}
 		Command = FString::Printf(TEXT("%s%s"),*Command,*PakOptionsStr);
-	}
+	});
 }
 
 FProjectPackageAssetCollection UFlibHotPatcherCoreHelper::ImportProjectSettingsPackages()
@@ -1965,6 +1947,12 @@ void UFlibHotPatcherCoreHelper::WaitForAsyncFileWrites()
 	WaitThreadWorker->Join();
 }
 
+void UFlibHotPatcherCoreHelper::WaitDDCComplete()
+{
+	SCOPED_NAMED_EVENT_TEXT("WaitDDCComplete",FColor::Red);
+	GetDerivedDataCacheRef().WaitForQuiescence(true);
+}
+
 bool UFlibHotPatcherCoreHelper::IsCanCookPackage(const FString& LongPackageName)
 {
 	bool bResult = false;
@@ -2024,7 +2012,7 @@ TArray<FExternDirectoryInfo> UFlibHotPatcherCoreHelper::GetProjectNotAssetDirCon
 	TArray<FExternDirectoryInfo> result;
 	const UProjectPackagingSettings* const PackagingSettings = GetDefault<UProjectPackagingSettings>();
 
-	FString BasePath = FString::Printf(TEXT("../../../%s/Content/%s"),FApp::GetProjectName());
+	FString BasePath = FString::Printf(TEXT("../../../%s/Content/"),FApp::GetProjectName());
 	auto FixPath = [](const FString& BasePath,const FString& Path)->FString
 	{
 		FString result;
@@ -2182,6 +2170,29 @@ void UFlibHotPatcherCoreHelper::CacheForCookedPlatformData(
     				GIsCookerLoadingPackage = false;
     			}
     			
+    			if(ExportObj->GetClass()->GetName().Equals(TEXT("LandscapeComponent")) && bStorageConcurrent)
+    			{
+    				UE_LOG(LogHotPatcherCoreHelper,Display,TEXT("Object %s is a LandscapeComponent"),*ExportObj->GetFullName());
+    				TArray<UTexture2D*>* MobileWeightmapTextures = nullptr;
+    				for(TFieldIterator<FProperty> PropertyIter(ExportObj->GetClass());PropertyIter;++PropertyIter)
+    				{
+    					FProperty* PropertyIns = *PropertyIter;
+    					if(PropertyIns->GetName().Equals(TEXT("MobileWeightmapTextures")))
+    					{
+    						MobileWeightmapTextures = PropertyIns->ContainerPtrToValuePtr<TArray<UTexture2D*>>(ExportObj);
+    						break;
+    					}
+    				}
+    				if(MobileWeightmapTextures)
+    				{
+    					UE_LOG(LogHotPatcherCoreHelper,Display,TEXT("Add %s MobileWeightmapTextures to ObjectsInPackage"),*ExportObj->GetFullName());
+    					for(UObject* MobileWeightmapTexture:*MobileWeightmapTextures)
+    					{
+    						ObjectsInPackage.AddUnique(MobileWeightmapTexture);
+    					}
+    				}
+    			}
+    			
     			for(const auto& Platform:TargetPlatforms)
     			{
     				if (bStorageConcurrent)
@@ -2223,6 +2234,26 @@ void UFlibHotPatcherCoreHelper::CacheForCookedPlatformData(
     			}
     		}
     	}
+		if (bStorageConcurrent)
+		{
+			// Precache the metadata so we don't risk rehashing the map in the parallelfor below
+			Package->GetMetaData();
+		}
+	}
+
+		
+	if (bStorageConcurrent)
+	{
+		// UE_LOG(LogHotPatcherCoreHelper, Display, TEXT("Calling PostSaveRoot on worlds..."));
+		for (auto WorldIt = WorldsToPostSaveRoot.CreateConstIterator(); WorldIt; ++WorldIt)
+		{
+#if ENGINE_MINOR_VERSION < 26
+			FScopedNamedEvent CacheExportEvent(FColor::Red,*FString::Printf(TEXT("World PostSaveRoot")));
+#endif
+			UWorld* World = WorldIt.Key();
+			check(World);
+			World->PostSaveRoot(WorldIt.Value());
+		}
 	}
 	
 	// When saving concurrently, flush async loading since that is normally done internally in SavePackage
@@ -2239,20 +2270,7 @@ void UFlibHotPatcherCoreHelper::CacheForCookedPlatformData(
 	{
 		UFlibHotPatcherCoreHelper::WaitObjectsCachePlatformDataComplete(ProcessedObjs,PendingCachePlatformDataObjects,TargetPlatforms);
 	}
-	
-	if (bStorageConcurrent)
-	{
-		// UE_LOG(LogHotPatcherCoreHelper, Display, TEXT("Calling PostSaveRoot on worlds..."));
-		for (auto WorldIt = WorldsToPostSaveRoot.CreateConstIterator(); WorldIt; ++WorldIt)
-		{
-#if ENGINE_MINOR_VERSION < 26
-			FScopedNamedEvent CacheExportEvent(FColor::Red,*FString::Printf(TEXT("World PostSaveRoot")));
-#endif
-			UWorld* World = WorldIt.Key();
-			check(World);
-			World->PostSaveRoot(WorldIt.Value());
-		}
-	}
+
 }
 
 void UFlibHotPatcherCoreHelper::WaitObjectsCachePlatformDataComplete(TSet<UObject*>& CachedPlatformDataObjects,TSet<UObject*>& PendingCachePlatformDataObjects,
@@ -2264,6 +2282,13 @@ void UFlibHotPatcherCoreHelper::WaitObjectsCachePlatformDataComplete(TSet<UObjec
 	{
 		// Wait for all shaders to finish compiling
 		UFlibShaderCodeLibraryHelper::WaitShaderCompilingComplete();
+	}
+
+	{
+		SCOPED_NAMED_EVENT_TEXT("FlushAsyncLoading And WaitingAsyncTasks",FColor::Red);
+		FlushAsyncLoading();
+		UE_LOG(LogHotPatcherCoreHelper, Display, TEXT("Waiting for async tasks..."));
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 	}
 	
 	{
@@ -2288,7 +2313,7 @@ void UFlibHotPatcherCoreHelper::WaitObjectsCachePlatformDataComplete(TSet<UObjec
 						}
 					}
 				}
-				// add to cched set
+				// add to cached set
 				if (bAllPlatformDataLoaded)
 				{
 					CachedPlatformDataObjects.Add(Object);
@@ -2506,8 +2531,10 @@ TempSandboxFile.Get()
 #endif
 	return bresult;
 }
+
 TArray<UClass*> UFlibHotPatcherCoreHelper::GetClassesByNames(const TArray<FName>& ClassesNames)
 {
+	SCOPED_NAMED_EVENT_TEXT("GetClassesByNames",FColor::Red);
 	TArray<UClass*> result;
 	for(const auto& ClassesName:ClassesNames)
 	{
@@ -2525,6 +2552,7 @@ TArray<UClass*> UFlibHotPatcherCoreHelper::GetClassesByNames(const TArray<FName>
 
 TArray<UClass*> UFlibHotPatcherCoreHelper::GetAllMaterialClasses()
 {
+	SCOPED_NAMED_EVENT_TEXT("GetAllMaterialClasses",FColor::Red);
 	TArray<UClass*> Classes;
 	TArray<FName> ParentClassesName = {
 		// materials
@@ -2541,12 +2569,115 @@ TArray<UClass*> UFlibHotPatcherCoreHelper::GetAllMaterialClasses()
 	return Classes;
 }
 
+bool UFlibHotPatcherCoreHelper::IsMaterialClasses(UClass* Class)
+{
+	return UFlibHotPatcherCoreHelper::IsMaterialClassName(Class->GetFName());
+};
+
+bool UFlibHotPatcherCoreHelper::IsMaterialClassName(FName ClassName)
+{
+	return UFlibHotPatcherCoreHelper::GetAllMaterialClassesNames().Contains(ClassName);
+}
+
+bool UFlibHotPatcherCoreHelper::AssetDetailsHasClasses(const TArray<FAssetDetail>& AssetDetails, TSet<FName> ClasssName)
+{
+	SCOPED_NAMED_EVENT_TEXT("AssetDetailsHasClasses",FColor::Red);
+	bool bHas = false;
+	for(const auto& Detail:AssetDetails)
+	{
+		if(ClasssName.Contains(Detail.AssetType))
+		{
+			bHas = true;
+			break;
+		}
+	}
+	return bHas;
+}
+
 TSet<FName> UFlibHotPatcherCoreHelper::GetAllMaterialClassesNames()
 {
+	SCOPED_NAMED_EVENT_TEXT("GetAllMaterialClassesNames",FColor::Red);
 	TSet<FName> result;
 	for(const auto& Class:GetAllMaterialClasses())
 	{
 		result.Add(Class->GetFName());
 	}
 	return result;
+}
+
+TArray<UClass*> UFlibHotPatcherCoreHelper::GetPreCacheClasses()
+{
+	SCOPED_NAMED_EVENT_TEXT("GetPreCacheClasses",FColor::Red);
+	TArray<UClass*> Classes;
+	
+	TArray<FName> ParentClassesName = {
+		// textures
+		TEXT("Texture"),
+		TEXT("PaperSprite"),
+		// material
+		// TEXT("MaterialExpression"),
+		// TEXT("MaterialParameterCollection"),
+		// TEXT("MaterialFunctionInterface"),
+		// TEXT("MaterialInterface"),
+		// other
+		TEXT("PhysicsAsset"),
+		TEXT("PhysicalMaterial"),
+		TEXT("StaticMesh"),
+		// curve
+		TEXT("CurveFloat"),
+		TEXT("CurveVector"),
+		TEXT("CurveLinearColor"),
+		// skeletal and animation
+		TEXT("Skeleton"),
+		TEXT("SkeletalMesh"),
+		TEXT("AnimSequence"),
+		TEXT("BlendSpace1D"),
+		TEXT("BlendSpace"),
+		TEXT("AnimMontage"),
+		TEXT("AnimComposite"),
+		// blueprint
+		TEXT("UserDefinedStruct"),
+		TEXT("Blueprint"),
+		// sound
+		TEXT("SoundWave"),
+		// particles
+		TEXT("FXSystemAsset"),
+		// large ref asset
+		TEXT("ActorSequence"),
+		TEXT("LevelSequence"),
+		TEXT("World") 
+	};
+
+	for(auto& ParentClass:UFlibHotPatcherCoreHelper::GetClassesByNames(ParentClassesName))
+	{
+		Classes.Append(UFlibHotPatcherCoreHelper::GetDerivedClasses(ParentClass,true,true));
+	}
+	Classes.Append(UFlibHotPatcherCoreHelper::GetAllMaterialClasses());
+	TSet<UClass*> Results;
+	for(const auto& Class:Classes)
+	{
+		Results.Add(Class);
+	}
+	return Results.Array();
+}
+
+void UFlibHotPatcherCoreHelper::DumpActiveTargetPlatforms()
+{
+	FString ActiveTargetPlatforms;
+	ITargetPlatformManagerModule* TPM = GetTargetPlatformManager();
+	if (TPM && (TPM->RestrictFormatsToRuntimeOnly() == false))
+	{
+		TArray<ITargetPlatform*> Platforms = TPM->GetActiveTargetPlatforms();
+		for(auto& Platform:Platforms)
+		{
+			ActiveTargetPlatforms += FString::Printf(TEXT("%s,"),*Platform->PlatformName());
+		}
+		ActiveTargetPlatforms.RemoveFromEnd(TEXT(","));
+	}
+	UE_LOG(LogHotPatcherCoreHelper,Display,TEXT("[IMPORTTENT] ActiveTargetPlatforms: %s"),*ActiveTargetPlatforms);
+}
+
+FString UFlibHotPatcherCoreHelper::GetPlatformsStr(TArray<ETargetPlatform> Platforms)
+{
+	return UFlibPatchParserHelper::GetPlatformsStr(Platforms);
 }

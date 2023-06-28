@@ -29,7 +29,7 @@ class VRM4U_API UVrmRuntimeSettings : public UObject
 	UPROPERTY(config, EditAnywhere, Category = Settings, meta = (
 		ConfigRestartRequired = true
 		))
-	bool bAllowAllAssimpFormat = true;
+	bool bAllowAllAssimpFormat = false;
 
 	//UPROPERTY(config, EditAnywhere, Category = Settings, meta = (AllowedClasses = "VrmAssetListObject", ExactClass = false))
 
